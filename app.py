@@ -94,31 +94,39 @@ def get_factor_score(prices):
     if len(prices) < 60:
         return 0
     
-    # Handle NaN values
-    prices = np.array(prices, dtype=float)
+    # Handle NaN values and ensure proper 1D array
+    prices = np.array(prices, dtype=float).flatten()
+    
+    if len(prices) < 60:
+        return 0
+    
     if np.isnan(prices).any() or np.isinf(prices).any():
         return 0
     
-    # Avoid division by zero
-    if np.any(prices[:-1] <= 0):
+    # Avoid division by zero - ensure both arrays have values
+    if np.any(prices[:-1] <= 0) or len(prices[:-1]) == 0:
         return 0
     
-    returns = np.diff(prices) / prices[:-1]
+    # Additional safety check
+    try:
+        returns = np.diff(prices) / prices[:-1]
+    except (ValueError, ZeroDivisionError):
+        return 0
     
     # Handle any NaN results from the division
-    if np.isnan(returns).any() or np.isinf(returns).any():
+    if len(returns) == 0 or np.isnan(returns).any() or np.isinf(returns).any():
         return 0
     
     # Momentum (recent returns)
-    momentum = np.mean(returns[-20:])
+    momentum = np.mean(returns[-20:]) if len(returns) >= 20 else np.mean(returns)
     
     # Trend (MA cross)
-    ma20 = np.mean(prices[-20:])
-    ma60 = np.mean(prices[-60:])
+    ma20 = np.mean(prices[-20:]) if len(prices) >= 20 else np.mean(prices)
+    ma60 = np.mean(prices[-60:]) if len(prices) >= 60 else np.mean(prices)
     trend = 1 if ma20 > ma60 else -1
     
     # Volatility (inverse - prefer stability)
-    volatility = np.std(returns[-20:])
+    volatility = np.std(returns[-20:]) if len(returns) >= 20 else np.std(returns)
     vol_score = -volatility if volatility > 0 else 0
     
     score = momentum * 0.5 + trend * 0.3 + vol_score * 0.2
