@@ -68,8 +68,21 @@ def fetch_splg_data(years=10):
     end_date = datetime.now()
     start_date = end_date - timedelta(days=365 * years)
     
-    data = yf.download('SPLG', start=start_date, end=end_date, progress=False)
-    return data['Close'].values.astype(float), data.index.to_numpy()
+    try:
+        data = yf.download('SPLG', start=start_date, end=end_date, progress=False)
+        if data is None or len(data) == 0:
+            raise ValueError("No SPLG data returned")
+        return data['Close'].values.astype(float), data.index.to_numpy()
+    except Exception as e:
+        logger.warning(f"Failed to fetch SPLG data: {e}. Using SPY as fallback.")
+        try:
+            data = yf.download('SPY', start=start_date, end=end_date, progress=False)
+            if data is None or len(data) == 0:
+                raise ValueError("No SPY data returned")
+            return data['Close'].values.astype(float), data.index.to_numpy()
+        except Exception as e2:
+            logger.error(f"Failed to fetch SPY data too: {e2}")
+            return np.array([]), np.array([])
 
 def get_factor_score(prices):
     """Score based on momentum, mean reversion, trend"""
@@ -147,12 +160,20 @@ def run_backtest(prices_dict, splg_prices, dates, use_equity_filter=True, split_
     tickers = list(prices_dict.keys())
     n_days = len(dates)
     
+    # Handle empty SPLG data
+    if len(splg_prices) == 0:
+        logger.warning("SPLG data is empty, using fallback index data")
+        splg_prices = np.ones(n_days)
+    
     # Align SPLG to prices length
     if len(splg_prices) > n_days:
         splg_prices = splg_prices[-n_days:]
     elif len(splg_prices) < n_days:
-        padding = np.full(n_days - len(splg_prices), splg_prices[0], dtype=float)
-        splg_prices = np.concatenate([padding, splg_prices])
+        if len(splg_prices) > 0:
+            padding = np.full(n_days - len(splg_prices), splg_prices[0], dtype=float)
+            splg_prices = np.concatenate([padding, splg_prices])
+        else:
+            splg_prices = np.ones(n_days)
     
     cumulative_ensemble = 1.0
     equity_curve = [1.0]
@@ -269,6 +290,9 @@ with st.spinner("Loading market data..."):
     if len(prices_dict) < 5:
         st.error("❌ Failed to load sufficient data. Please try again.")
         st.stop()
+    
+    if len(splg_prices) == 0:
+        st.warning("⚠️ SPLG index data unavailable. Using fallback index for passive portfolio.")
 
 st.success(f"✅ Loaded {len(prices_dict)} stocks with {len(dates)} trading days")
 
