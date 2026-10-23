@@ -54,13 +54,18 @@ def fetch_price_data(tickers, years=10):
         try:
             data = yf.download(ticker, start=start_date, end=end_date, progress=False)
             if len(data) > 0:
-                prices_dict[ticker] = data['Close'].values.astype(float)
-                if dates is None:
-                    dates = data.index.to_numpy()
+                prices = data['Close'].values.astype(float)
+                # Validate prices: no NaN, no zeros, no infinities
+                if not np.isnan(prices).any() and not np.isinf(prices).any() and np.all(prices > 0):
+                    prices_dict[ticker] = prices
+                    if dates is None:
+                        dates = data.index.to_numpy()
+                else:
+                    logger.warning(f"Invalid price data for {ticker}: contains NaN, Inf, or non-positive values")
         except Exception as e:
             logger.warning(f"Failed to fetch {ticker}: {e}")
     
-    return prices_dict, pd.DatetimeIndex(dates)
+    return prices_dict, pd.DatetimeIndex(dates) if dates is not None else pd.DatetimeIndex([])
 
 @st.cache_data(ttl=86400)
 def fetch_splg_data(years=10):
@@ -89,7 +94,20 @@ def get_factor_score(prices):
     if len(prices) < 60:
         return 0
     
+    # Handle NaN values
+    prices = np.array(prices, dtype=float)
+    if np.isnan(prices).any() or np.isinf(prices).any():
+        return 0
+    
+    # Avoid division by zero
+    if np.any(prices[:-1] <= 0):
+        return 0
+    
     returns = np.diff(prices) / prices[:-1]
+    
+    # Handle any NaN results from the division
+    if np.isnan(returns).any() or np.isinf(returns).any():
+        return 0
     
     # Momentum (recent returns)
     momentum = np.mean(returns[-20:])
